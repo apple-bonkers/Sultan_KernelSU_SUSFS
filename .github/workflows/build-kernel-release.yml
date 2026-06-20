@@ -233,7 +233,7 @@ jobs:
 
           ### Versions:
           - **KernelSU Next**: [${{ env.KSUN_VERSION }}](${{ env.KSUN_URL }})
-          - **SUSFS**: [v2.0.0](https://gitlab.com/simonpunk/susfs4ksu/-/tree/gki-android14-6.1) [(${{ env.SUSFS_COMMIT }})](${{ env.SUSFS_URL }})
+          - **SUSFS**: [v2.2.0](https://gitlab.com/simonpunk/susfs4ksu/-/tree/gki-android14-6.1) [(${{ env.SUSFS_COMMIT }})](${{ env.SUSFS_URL }})
 
           ### Links:
           - **KernelSU Next Manager**: https://t.me/ksunext_ci
