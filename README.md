@@ -1,4 +1,4 @@
-# Sultan Kernels for Android
+# Sultan Kernels for Android WIP
 
 Automated builds of Sultan kernels with KernelSU-Next and SUSFS support for Google Tensor devices.
 
