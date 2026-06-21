@@ -30,6 +30,9 @@ jobs:
       matrix:
         susfs: ${{ inputs.build_with_susfs && fromJSON('[true, false]') || fromJSON('[false]') }}
     steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
@@ -177,13 +180,18 @@ jobs:
           cd "$CONFIG"
           # Mali GPU driver's version_compat_defs.h redefines vm_flags_set/vm_flags_clear/__vm_flags_mod
           # which are already present in Linux 6.1+. Guard them with a kernel version check.
-          MALI_COMPAT="google-modules/gpu/common/include/linux/version_compat_defs.h"
-          if [ -f "$MALI_COMPAT" ]; then
-            echo "Patching Mali GPU compat header for Linux 6.1+..."
-            sed -i 's/#ifndef VM_FLAGS_ACCESSORS/#if !defined(VM_FLAGS_ACCESSORS) \&\& LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)/' "$MALI_COMPAT"
-            echo "Mali GPU compat header patched successfully"
+          # The file may be at different paths depending on kernel source layout.
+          MALI_FILES=$(find google-modules -name "version_compat_defs.h" -type f 2>/dev/null)
+          if [ -z "$MALI_FILES" ]; then
+            echo "Mali GPU compat header not found — skipping"
           else
-            echo "Mali GPU compat header not found at $MALI_COMPAT — skipping (may not exist in this kernel)"
+            for f in $MALI_FILES; do
+              echo "Patching $f for Linux 6.1+..."
+              sed -i '/#ifndef[[:space:]]VM_FLAGS_ACCESSORS/{
+                s/#ifndef[[:space:]]VM_FLAGS_ACCESSORS/#if !defined(VM_FLAGS_ACCESSORS) \&\& LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)/
+              }' "$f"
+              echo "Patched $f successfully"
+            done
           fi
 
       - name: Build Kernel
