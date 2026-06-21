@@ -59,7 +59,7 @@ Special thanks to the open-source community for their contributions!
 
 # Support
 
-If you encounter any problems or need help, feel free to open the issue in this repository or contact me on [Telegram](https://t.me/mrvokintos)
+If you encounter any problems or need help, feel free to open the issue in this repository or contact me on [Telegram](https://t.me/applebonkers)
 
 ---
 
@@ -73,7 +73,7 @@ Flashing this kernel will void your warranty, and there is always a risk of bric
 
 # Contacts
 
-[Telegram](https://t.me/mrvokintos)
+[Telegram](https://t.me/applebonkers)
 
-Discord: mrvokintos
+[Discord](https://discord.com/users/1029980209983787070)
 
