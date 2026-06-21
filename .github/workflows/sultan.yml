@@ -64,7 +64,20 @@ jobs:
           echo "Changing to configuration directory: $CONFIG..."
           cd "$CONFIG"
           echo "Adding latest KernelSU-Next from dev branch..."
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/dev/kernel/setup.sh" | bash -s dev
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/dev/kernel/setup.sh" | bash -s dev || {
+            echo "ERROR: KernelSU-Next setup.sh failed!"
+            ls -la
+            exit 1
+          }
+          # Verify the directory was created (new setup.sh uses KernelSU-Next, old used KernelSU)
+          for dir in KernelSU-Next KernelSU; do
+            if [ -d "$dir" ]; then echo "Found KSU directory: $dir"; fi
+          done
+          if [ ! -d "KernelSU-Next" ] && [ ! -d "KernelSU" ]; then
+            echo "ERROR: No KernelSU directory found after setup!"
+            ls -la
+            exit 1
+          fi
           
       - name: Apply SUSFS Patches
         if: ${{ matrix.susfs }}
@@ -79,7 +92,15 @@ jobs:
           cp ../susfs4ksu/kernel_patches/include/linux/* ./include/linux/ 2>/dev/null || true
           
           echo "Patching KernelSU-Next for SUSFS..."
-          cd KernelSU-Next
+          # Setup.sh may create KernelSU-Next or KernelSU directory
+          KSU_DIR="KernelSU-Next"
+          if [ ! -d "$KSU_DIR" ]; then KSU_DIR="KernelSU"; fi
+          if [ ! -d "$KSU_DIR" ]; then
+            echo "ERROR: No KernelSU directory found! Contents:"
+            ls -la
+            exit 1
+          fi
+          cd "$KSU_DIR"
           cp ../../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./
           patch -p1 -F5 --ignore-whitespace < 10_enable_susfs_for_ksu.patch || echo "WARNING: SUSFS enable patch had some failures — fix patch will attempt to resolve"
 
