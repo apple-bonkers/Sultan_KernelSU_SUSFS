@@ -30,15 +30,10 @@ jobs:
       matrix:
         susfs: ${{ inputs.build_with_susfs && fromJSON('[true, false]') || fromJSON('[false]') }}
     steps:
-      - name: Download and extract GCC 14.2.0 toolchain
+      - name: Install Build Dependencies
         run: |
-          echo "Downloading GCC 14.2.0 cross-compiler toolchain..."
-          wget https://www.kernel.org/pub/tools/crosstool/files/bin/x86_64/14.2.0/x86_64-gcc-14.2.0-nolibc-aarch64-linux.tar.gz
-          echo "Extracting .gz file..."
-          gunzip x86_64-gcc-14.2.0-nolibc-aarch64-linux.tar.gz
-          echo "Extracting .tar file..."
-          tar -xf x86_64-gcc-14.2.0-nolibc-aarch64-linux.tar
-          echo "GCC 14.2.0 toolchain extracted successfully"
+          sudo apt-get update
+          sudo apt-get install -y build-essential bc bison flex libssl-dev libelf-dev gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
           
       - name: Set CONFIG Environment Variable
         run: |
@@ -184,9 +179,8 @@ jobs:
       - name: Build Kernel
         run: |
           cd "$CONFIG"
-          export PATH=$PATH:$(pwd)/../x86_64-gcc-14.2.0-nolibc-aarch64-linux/bin
           make ARCH=arm64 ${{ inputs.codename }}_defconfig
-          make -j$(nproc) ARCH=arm64 CROSS_COMPILE=aarch64-linux- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- KCFLAGS="-w"
+          make -j$(nproc) ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- KCFLAGS="-w"
 
       - name: Package Kernel
         run: |
