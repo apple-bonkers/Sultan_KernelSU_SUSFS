@@ -1,293 +1,222 @@
-name: Build and Release Sultan Kernels
-
+name: Sultan
 permissions:
-  contents: write  # Allow writing to repository contents (for pushing tags)
-  actions: write   # Allows triggering actions
-  
+  contents: write
+  actions: write
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
-
+      codename:
+        required: true
+        type: string
+      repo:
+        required: true
+        type: string
+      android_version:
+        required: true
+        type: string
+      kernel_version:
+        required: true
+        type: string
       build_with_susfs:
-        description: 'Include SUSFS? (if true, builds both w/ and w/o SUSFS)'
-        required: true
-        type: choice
-        options:
-          - 'false'
-          - 'true'
-        default: 'false'
-
-      upload_type:
-        description: 'Upload Type'
-        required: true
-        type: choice
-        options:
-          - 'artifact'
-          - 'pre-release'
-          - 'release'
-        default: 'artifact'
-
-      build_gs201:
-        description: 'Build for GS201 (Pixel 7/7 Pro/7a)?'
         required: false
         type: boolean
-        default: true
-      build_zuma:
-        description: 'Build for Zuma (Pixel 8/8 Pro/8a)?'
-        required: false
-        type: boolean
-        default: true
-      build_zumapro:
-        description: 'Build for ZumaPro (Pixel 9/9 Pro/9 Pro XL/9 Pro Fold)?'
-        required: false
-        type: boolean
-        default: true
-        
+        default: false
 jobs:
-  build-kernel-gs201:
-    if: ${{ inputs.build_gs201 == true }}
-    uses: ./.github/workflows/sultan.yml
-    secrets: inherit
-    with:
-      codename: "gs201"
-      repo: "android_kernel_google_gs201"
-      android_version: "android14"
-      kernel_version: "6.1"
-      build_with_susfs: ${{ inputs.build_with_susfs == 'true' }}
-      
-  build-kernel-zuma:
-    if: ${{ inputs.build_zuma == true }}
-    uses: ./.github/workflows/sultan.yml
-    secrets: inherit
-    with:
-      codename: "zuma"
-      repo: "android_kernel_google_zuma"
-      android_version: "android14"
-      kernel_version: "6.1"
-      build_with_susfs: ${{ inputs.build_with_susfs == 'true' }}
-
-  build-kernel-zumapro:
-    if: ${{ inputs.build_zumapro == true }}
-    uses: ./.github/workflows/sultan.yml
-    secrets: inherit
-    with:
-      codename: "zumapro"
-      repo: "android_kernel_google_zumapro"
-      android_version: "android14"
-      kernel_version: "6.1"
-      build_with_susfs: ${{ inputs.build_with_susfs == 'true' }}
-
-  trigger-release:
-    if: ${{ inputs.upload_type != 'artifact' }}
+  build-kernel:
+    name: build-kernel-sultan-kernelsu-next${{ matrix.susfs == true && '-susfs' || '' }}
     runs-on: ubuntu-latest
-    needs:
-        - build-kernel-gs201
-        - build-kernel-zuma
-        - build-kernel-zumapro
-    env:
-      REPO_OWNER: mrvokintos
-      REPO_NAME: Sultan_KernelSU_SUSFS
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      RELEASE_NAME: "Sultan Kernels With KernelSU Next & SUSFS"
-
+    strategy:
+      fail-fast: false
+      matrix:
+        susfs: ${{ inputs.build_with_susfs && fromJSON('[true, false]') || fromJSON('[false]') }}
     steps:
-      # Checkout the code
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      # Get KernelSU Next version // inspired by https://github.com/TheSillyOk/sh/blob/main/get_ksuver.sh
-      - name: Get KernelSU Next Version
-        id: ksu_version
+      - name: Install Build Dependencies
         run: |
-          OWNER="KernelSU-Next"
-          REPO="KernelSU-Next"
-          REF="dev"
-          API_URL="https://api.github.com"
+          sudo apt-get update
+          sudo apt-get install -y build-essential bc bison flex libssl-dev libelf-dev gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
           
-          # Get commit count
-          COMMIT_COUNT=$(curl --silent -I -H "Accept: application/vnd.github.v3+json" "$API_URL/repos/$OWNER/$REPO/commits?sha=$REF&per_page=1" | grep -i "^link:" | sed -n 's/.*page=\([0-9]*\)>; rel="last".*/\1/p')
-          if [ -z "$COMMIT_COUNT" ]; then
-            COMMIT_COUNT=$(curl --silent -H "Accept: application/vnd.github.v3+json" "$API_URL/repos/$OWNER/$REPO/commits?sha=$REF&per_page=100" | jq '. | length')
-          fi
-          
-          echo "Commit count: $COMMIT_COUNT"
-          
-          # Try to get formula from Kbuild or Makefile
-          FORMULA_FILE=""
-          for file in Kbuild Makefile; do
-            for type in "refs/heads/" "refs/tags/" "/"; do
-              curl -LSs "https://github.com/$OWNER/$REPO/raw/${type}${REF}/kernel/$file" > temp_file 2>/dev/null || continue
-              
-              if grep -q "KSU_VERSION" temp_file 2>/dev/null; then
-                FORMULA_FILE="temp_file"
-                echo "Found formula in: $file (type: $type)"
-                break 2
-              fi
-              rm -f temp_file
-            done
-          done
-          
-          if [ -z "$FORMULA_FILE" ]; then
-            echo "Error: Could not find KSU version formula"
-            KSUN_VERSION="unknown"
+      - name: Set CONFIG Environment Variable
+        run: |
+          if [[ "${{ inputs.codename }}" == "tensynos" || "${{ inputs.repo }}" == "android_kernel_google_tensynos" ]]; then
+            CONFIG="android_kernel_google_tensynos"
           else
-            # Extract version formula
-            FORMULA_LINE=$(grep -E 'KSU_VERSION *:?=.*?(KSU_GIT[^_]*_VERSION|rev-list)' "$FORMULA_FILE" || true)
-            echo "Formula line: $FORMULA_LINE"
-            
-            if [[ "$FORMULA_LINE" == *"KSU"* ]]; then
-              # Extract math expression
-              MATH_EXPR=$(echo "$FORMULA_LINE" | sed 's/.*expr //;s/))//' | xargs)
-              echo "Math expression: $MATH_EXPR"
-              
-              if [ -n "$MATH_EXPR" ]; then
-                # Replace variables with commit count and calculate
-                CALC_STRING=$(echo "$MATH_EXPR" | sed -E "s/\\$\((KSU_GIT_VERSION|KSU_GITHUB_VERSION_COMMIT)\)|\\$\(shell.*rev-list[^\)]*\)/$COMMIT_COUNT/;s/\)//;s/\(//")
-                echo "Calculation string: $CALC_STRING"
-                KSUN_VERSION=$(echo "$CALC_STRING" | bc)
-              fi
-            fi
-            
-            # If still empty, try to find hardcoded version
-            if [ -z "$KSUN_VERSION" ]; then
-              KSUN_VERSION=$(grep -E '^ccflags-y \+= -DKSU_VERSION=[0-9]+' "$FORMULA_FILE" | head -n 1 | grep -oP '[0-9]+' || true)
-            fi
-            
-            rm -f temp_file
+            CONFIG="${{ inputs.repo }}"
+          fi
+          echo "CONFIG=$CONFIG" >> $GITHUB_ENV
+          echo "CONFIG set to: $CONFIG"
+          
+      - name: Clone AnyKernel3 and Other Dependencies
+        run: |
+          echo "Cloning AnyKernel3 and other dependencies..."
+          ANYKERNEL_BRANCH="sultan-${{ inputs.codename }}"
+          echo "Using branch for AnyKernel3: $ANYKERNEL_BRANCH"
+          git clone https://github.com/TheWildJames/AnyKernel3.git -b "$ANYKERNEL_BRANCH"
+          git clone https://github.com/WildKernels/kernel_patches.git
+          git clone https://github.com/kerneltoast/$CONFIG
+          if [[ "${{ matrix.susfs }}" == "true" ]]; then
+            SUSFS_BRANCH="gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}"
+            echo "Using branch for SUSFS: $SUSFS_BRANCH"
+            git clone https://gitlab.com/simonpunk/susfs4ksu.git -b "$SUSFS_BRANCH"
           fi
           
-          # Get commit hash for URL
-          KSUN_COMMIT=$(git ls-remote https://github.com/$OWNER/$REPO.git $REF | awk '{print $1}')
-          KSUN_URL="https://github.com/$OWNER/$REPO/commit/${KSUN_COMMIT}"
-          
-          echo "KSUN_VERSION=${KSUN_VERSION}" >> $GITHUB_ENV
-          echo "KSUN_URL=${KSUN_URL}" >> $GITHUB_ENV
-          
-          echo "KernelSU Next version: ${KSUN_VERSION}"
-          echo "Commit URL: ${KSUN_URL}"
-
-      # Get SUSFS version and commit
-      - name: Get SUSFS Version
-        id: susfs_version
+      - name: Add KernelSU-Next
         run: |
-          OWNER="simonpunk"
-          REPO="susfs4ksu"
-          REF="gki-android14-6.1"
+          echo "Changing to configuration directory: $CONFIG..."
+          cd "$CONFIG"
+          echo "Adding KernelSU-Next from branch: dev..."
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/dev/kernel/setup.sh" | bash -s dev
           
-          # Get latest commit hash
-          SUSFS_COMMIT=$(git ls-remote https://gitlab.com/$OWNER/$REPO.git $REF | awk '{print $1}' | cut -c1-8)
-          SUSFS_URL="https://gitlab.com/$OWNER/$REPO/-/commit/${SUSFS_COMMIT}"
-          
-          echo "SUSFS_COMMIT=${SUSFS_COMMIT}" >> $GITHUB_ENV
-          echo "SUSFS_URL=${SUSFS_URL}" >> $GITHUB_ENV
-          
-          echo "SUSFS commit: ${SUSFS_COMMIT}"
-          echo "Commit URL: ${SUSFS_URL}"
-
-      # Get the Latest Tag from GitHub
-      - name: Generate and Create New Tag
+      - name: Apply SUSFS Patches
+        if: ${{ matrix.susfs }}
         run: |
-            # Fetch the latest tag from GitHub (using git ls-remote to ensure we get the absolute latest)
-            # Filter for tags matching vX.X.X format and sort them by version
-            LATEST_TAG=$(git ls-remote --tags origin | awk -F/ '{print $3}' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1)
-            
-            if [ -z "$LATEST_TAG" ]; then
-              NEW_TAG="v1.0.0"
-              echo "No existing tags found. Starting with $NEW_TAG"
-            else
-              echo "Latest remote tag found: $LATEST_TAG"
-              
-              # Extract version numbers (e.g., v1.2.3 -> 1, 2, 3)
-              VERSION=$(echo "$LATEST_TAG" | sed 's/^v//')
-              MAJOR=$(echo "$VERSION" | cut -d. -f1)
-              MINOR=$(echo "$VERSION" | cut -d. -f2)
-              PATCH=$(echo "$VERSION" | cut -d. -f3)
-              
-              # Increment patch version
-              PATCH=$((PATCH + 1))
-              NEW_TAG="v${MAJOR}.${MINOR}.${PATCH}"
-              
-              echo "Incremented to: $NEW_TAG"
-            fi
-            
-            # Set the new tag as an environment variable to be used in later steps
-            echo "NEW_TAG=${NEW_TAG}" >> $GITHUB_ENV
-            
-            # Create the tag in the repository
-            git tag $NEW_TAG
-            git push origin $NEW_TAG
-            
-      # Download Artifacts for A12 (Only if A12 Build is successful or input is true or empty)
-      - name: Download Artifacts
-        uses: actions/download-artifact@v4
+          echo "Changing to configuration directory: $CONFIG..."
+          cd "$CONFIG"
+          SUSFS_VERSION="2.1.0"
+          echo "Copying SUSFS patches..."
+          cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch ./
+          mkdir -p ./fs/
+          mkdir -p ./include/linux/
+          cp ../susfs4ksu/kernel_patches/fs/* ./fs/ 2>/dev/null || true
+          cp ../susfs4ksu/kernel_patches/include/linux/* ./include/linux/ 2>/dev/null || true
+          
+          echo "Patching KernelSU-Next for SUSFS..."
+          cd KernelSU-Next
+          cp ../../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./
+          patch -p1 < 10_enable_susfs_for_ksu.patch
+          
+          echo "Copying all fix patches for Next SUSFS support (v${SUSFS_VERSION})..."
+          cp "../../kernel_patches/next/susfs_fix_patches/v${SUSFS_VERSION}/"*.patch ./
+          
+          echo "fixing Makefile/kbuild"
+          patch -p1 < fix_Makefile.patch
+          echo "fixing allowlist.c"
+          patch -p1 < fix_allowlist.c.patch
+          echo "fixing apk_sign.c"
+          patch -p1 < fix_apk_sign.c.patch
+          echo "fixing kernel_umount.c"
+          patch -p1 < fix_kernel_umount.c.patch
+          echo "fixing ksu.c"
+          patch -p1 < fix_ksu.c.patch
+          echo "fixing ksud.c"
+          patch -p1 < fix_ksud.c.patch
+          echo "fixing selinux.c"
+          patch -p1 < fix_selinux.c.patch
+          echo "fixing setuid_hook.c"
+          patch -p1 < fix_setuid_hook.c.patch
+          echo "fixing sucompat.c"
+          patch -p1 < fix_sucompat.c.patch
+          echo "fixing supercalls.c"
+          patch -p1 < fix_supercalls.c.patch
+          echo "overwriting hook mode"
+          patch -p1 < overwrite_hook_mode.patch
+          echo "patching ksu_toolkit"
+          patch -p1 < ksu_toolkit.patch
+          
+          echo "KernelSU-Next patched successfully"
+          cd ..
+          echo "Applying SUSFS GKI patch..."
+          patch -p1 < 50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch
+          
+          echo "Applying Sultan-specific patches..."
+          if [ -f "../kernel_patches/sultan/fix_base.c.patch" ]; then
+            echo "Applying fix_base.c.patch..."
+            patch -p1 < ../kernel_patches/sultan/fix_base.c.patch
+          fi
+          if [ -f "../kernel_patches/sultan/sys.c_fix.patch" ]; then
+            echo "Applying sys.c_fix.patch..."
+            patch -p1 < ../kernel_patches/sultan/sys.c_fix.patch
+          fi
+
+      - name: Configure KernelSU
+        run: |
+          cd "$CONFIG"
+          echo "# KernelSU Configuration" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
+          echo "CONFIG_KSU=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
+          if [[ "${{ matrix.susfs }}" == "true" ]]; then
+            echo "CONFIG_KSU_SUSFS=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
+          else
+            echo "CONFIG_KSU_SUSFS=n" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
+          fi
+
+      - name: Configure Mountify Support
+        run: |
+          cd "$CONFIG"
+          echo "# Mountify Support" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
+          echo "CONFIG_TMPFS_XATTR=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
+          echo "CONFIG_TMPFS_POSIX_ACL=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
+
+      - name: Configure Networking
+        run: |
+          cd "$CONFIG"
+          echo "# Networking Configuration" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
+          echo "CONFIG_IP_NF_TARGET_TTL=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
+          echo "CONFIG_IP6_NF_TARGET_HL=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
+          echo "CONFIG_IP6_NF_MATCH_HL=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
+
+      - name: Configure TCP Congestion Control
+        run: |
+          cd "$CONFIG"
+          echo "# BBR TCP Congestion Control" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
+          echo "CONFIG_TCP_CONG_ADVANCED=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
+          echo "CONFIG_TCP_CONG_BBR=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
+          echo "CONFIG_NET_SCH_FQ=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
+          echo "CONFIG_TCP_CONG_BIC=n" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
+          echo "CONFIG_TCP_CONG_WESTWOOD=n" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
+          echo "CONFIG_TCP_CONG_HTCP=n" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
+
+      - name: Configure IPSet Support
+        run: |
+          cd "$CONFIG"
+          echo "# IPSet Support" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
+          echo "CONFIG_IP_SET=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
+          echo "CONFIG_IP_SET_MAX=65534" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
+          echo "CONFIG_IP_SET_BITMAP_IP=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
+          echo "CONFIG_IP_SET_BITMAP_IPMAC=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
+          echo "CONFIG_IP_SET_BITMAP_PORT=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
+          echo "CONFIG_IP_SET_HASH_IP=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
+          echo "CONFIG_IP_SET_HASH_IPMARK=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
+
+      - name: Build Kernel
+        run: |
+          cd "$CONFIG"
+          make ARCH=arm64 ${{ inputs.codename }}_defconfig
+          make -j$(nproc) ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- KCFLAGS="-w"
+
+      - name: Package Kernel
+        run: |
+          cd "$CONFIG"
+          mkdir -p out
+          cp arch/arm64/boot/Image out/
+          if [ -f arch/arm64/boot/Image.gz ]; then
+            cp arch/arm64/boot/Image.gz out/
+          fi
+          if [ -f arch/arm64/boot/Image-dtb ]; then
+            cp arch/arm64/boot/Image-dtb out/
+          fi
+          if [ -f arch/arm64/boot/Image.gz-dtb ]; then
+            cp arch/arm64/boot/Image.gz-dtb out/
+          fi
+          # Copy modules if they exist
+          find . -name "*.ko" -exec cp {} out/ \;
+          
+      - name: Create AnyKernel3 Flashable Zip
+        run: |
+          cd AnyKernel3
+          # Clean up previous artifacts
+          rm -rf kernel/ dtbo.img
+          mkdir -p kernel
+          cp ../$CONFIG/out/Image* kernel/
+          if [ -f ../$CONFIG/out/*.ko ]; then
+            mkdir -p modules
+            cp ../$CONFIG/out/*.ko modules/
+          fi
+          
+          # Zip the contents
+          zip -r9 ../${{ inputs.codename }}-Sultan-KernelSU-Next${{ matrix.susfs == true && '-SUSFS' || '' }}.zip * .version
+          
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
         with:
-          path: ./downloaded-artifacts
-
-      # Generate Release Notes
-      - name: Generate Release Notes
-        run: |
-          cat << EOF > release_notes.md
-          This release contains KernelSU Next and SUSFS
-          
-          Fork by [mrvokintos](https://github.com/mrvokintos)
-
-          ### Versions:
-          - **KernelSU Next**: [${{ env.KSUN_VERSION }}](${{ env.KSUN_URL }})
-          - **SUSFS**: [v2.2.0](https://gitlab.com/simonpunk/susfs4ksu/-/tree/gki-android14-6.1) [(${{ env.SUSFS_COMMIT }})](${{ env.SUSFS_URL }})
-
-          ### Links:
-          - **KernelSU Next Manager**: https://t.me/ksunext_ci
-          - **SUSFS Module**: https://github.com/sidex15/ksu_module_susfs
-          EOF
-
-      # Create GitHub Release and upload files
-      - name: Create GitHub Release
-        id: create_release
-        uses: actions/create-release@v1
-        with:
-          tag_name: ${{ env.NEW_TAG }}
-          release_name: ${{ env.RELEASE_NAME }}
-          body_path: release_notes.md
-          prerelease: ${{ inputs.upload_type == 'pre-release' }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload Release Assets Dynamically
-        run: |
-          # Loop through all directories in the downloaded-artifacts directory
-          # Each directory corresponds to an artifact
-          cd ./downloaded-artifacts
-          
-          # Custom sort: by device (gs201, zuma, zumapro), then by type (Next before Next-SUSFS)
-          # This creates a sort key by replacing SUSFS with a character that sorts after regular Next
-          for dir in $(ls -1 | sed 's/Next-SUSFS/Next~SUSFS/g' | sort | sed 's/Next~SUSFS/Next-SUSFS/g'); do
-              # Skip if not a directory
-              if [ ! -d "$dir" ]; then
-                  continue
-              fi
-              
-              # Skip .rej bundles (debug artifacts)
-              if [[ "$dir" == rej-* ]]; then
-                  echo "Skipping debug artifact: $dir"
-                  continue
-              fi
-
-              echo "Zipping artifact: $dir..."
-              # Navigate into the directory to zip contents at root
-              cd "$dir"
-              zip -r "../${dir}.zip" ./*
-              cd ..
-              
-              # Upload the file to the GitHub release
-              echo "Uploading ${dir}.zip..."
-              gh release upload ${{ env.NEW_TAG }} "${dir}.zip"
-          done
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NEW_TAG: ${{ env.NEW_TAG }}
-
-      # Display Files Uploaded
-      - name: Display Files Uploaded
-        run: |
-          echo "GitHub release created with the following files:"
-          ls ./downloaded-artifacts/**/*
+          name: ${{ inputs.codename }}-Sultan-KernelSU-Next${{ matrix.susfs == true && '-SUSFS' || '' }}
+          path: |
+            ${{ inputs.codename }}-Sultan-KernelSU-Next${{ matrix.susfs == true && '-SUSFS' || '' }}.zip
