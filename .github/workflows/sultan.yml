@@ -63,17 +63,14 @@ jobs:
         run: |
           echo "Changing to configuration directory: $CONFIG..."
           cd "$CONFIG"
-          # Pin to a known-compatible commit for SUSFS patches (2026-06-20)
-          KSU_COMMIT="1d919700"
-          echo "Adding KernelSU-Next from commit: ${KSU_COMMIT}..."
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/${KSU_COMMIT}/kernel/setup.sh" | bash -s "${KSU_COMMIT}"
+          echo "Adding latest KernelSU-Next from dev branch..."
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/dev/kernel/setup.sh" | bash -s dev
           
       - name: Apply SUSFS Patches
         if: ${{ matrix.susfs }}
         run: |
           echo "Changing to configuration directory: $CONFIG..."
           cd "$CONFIG"
-          SUSFS_VERSION="2.1.0"
           echo "Copying SUSFS patches..."
           cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch ./
           mkdir -p ./fs/
@@ -84,26 +81,13 @@ jobs:
           echo "Patching KernelSU-Next for SUSFS..."
           cd KernelSU-Next
           cp ../../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./
-          patch -p1 -F5 --ignore-whitespace < 10_enable_susfs_for_ksu.patch || echo "WARNING: SUSFS enable patch had some failures — fix patches will attempt to resolve"
-          
-          echo "Copying all fix patches for Next SUSFS support (v${SUSFS_VERSION})..."
-          cp "../../kernel_patches/next/susfs_fix_patches/v${SUSFS_VERSION}/"*.patch ./
-          
-          # Apply all fix patches with tolerance for partial failures
-          for fix_patch in fix_Kbuild.patch fix_Makefile.patch fix_init.c.patch \
-                          fix_kernel_umount.c.patch fix_ksud_integration.c.patch \
-                          fix_setuid_hook.c.patch fix_sucompat.c.patch fix_sucompat.h.patch \
-                          fix_supercall.c.patch overwrite_hook_mode.patch ksu_toolkit.patch \
-                          multi_manager.patch; do
-            if [ -f "$fix_patch" ]; then
-              echo "Applying $fix_patch..."
-              patch -p1 -F5 --ignore-whitespace < "$fix_patch" || echo "WARNING: $fix_patch had failures (non-fatal, continuing)"
-            else
-              echo "NOTE: $fix_patch not found, skipping"
-            fi
-          done
-          
-          echo "KernelSU-Next patched (with best-effort fixups)"
+          patch -p1 -F5 --ignore-whitespace < 10_enable_susfs_for_ksu.patch || echo "WARNING: SUSFS enable patch had some failures — fix patch will attempt to resolve"
+
+          echo "Applying unified SUSFS fix patch for latest KSU-Next..."
+          cp "$GITHUB_WORKSPACE/susfs-fix-latest.patch" ./
+          patch -p1 -F3 --ignore-whitespace < susfs-fix-latest.patch || echo "WARNING: fix patch had some failures (non-fatal, continuing)"
+
+          echo "KernelSU-Next patched"
           cd ..
           echo "Applying SUSFS GKI patch..."
           patch -p1 -F5 --ignore-whitespace < 50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch || echo "WARNING: SUSFS GKI patch had failures"
