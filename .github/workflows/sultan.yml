@@ -64,7 +64,7 @@ jobs:
             git clone https://gitlab.com/simonpunk/susfs4ksu.git -b "$SUSFS_BRANCH"
           fi
           
-           - name: Add KernelSU-Next
+      - name: Add KernelSU-Next
         run: |
           echo "Changing to configuration directory: $CONFIG..."
           cd "$CONFIG"
