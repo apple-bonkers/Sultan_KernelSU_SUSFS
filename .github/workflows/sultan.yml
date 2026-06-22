@@ -129,18 +129,19 @@ jobs:
 
           # Strip Clang-only flags that break GCC (after ALL patches applied)
           echo "Stripping GCC-incompatible flags from all Kbuild and Makefile files..."
-          find . -name "Kbuild" -type f -print -exec sed -i 's/-Wno-gcc-compat//g' {} \;
-          find . -name "Makefile" -type f -print -exec sed -i 's/-Wno-gcc-compat//g' {} \;
+          grep -rl "Wno-gcc-compat" . --include="Makefile" --include="Kbuild" 2>/dev/null | xargs -r sed -i 's/-Wno-gcc-compat//g'
+          # Also strip GCC-only flags that would break Clang
+          grep -rl "fipa-pta" . --include="Makefile" --include="Kbuild" 2>/dev/null | xargs -r sed -i 's/-fipa-pta//g'
           
           # Verify the strip worked
-          echo "Verifying no -Wno-gcc-compat remains..."
-          if grep -rq "Wno-gcc-compat" . --include="Kbuild" --include="Makefile" 2>/dev/null; then
-            echo "WARNING: -Wno-gcc-compat still found in:"
-            grep -rn "Wno-gcc-compat" . --include="Kbuild" --include="Makefile" 2>/dev/null
-            echo "Attempting force removal..."
-            grep -rl "Wno-gcc-compat" . --include="Kbuild" --include="Makefile" 2>/dev/null | xargs -r sed -i 's/-Wno-gcc-compat//g'
+          echo "Verifying incompatible flags are gone..."
+          if grep -rq "Wno-gcc-compat\|fipa-pta" . --include="Kbuild" --include="Makefile" 2>/dev/null; then
+            echo "WARNING: incompatible flags still found in:"
+            grep -rn "Wno-gcc-compat\|fipa-pta" . --include="Kbuild" --include="Makefile" 2>/dev/null
+            echo "Force-removing..."
+            grep -rl "Wno-gcc-compat\|fipa-pta" . --include="Kbuild" --include="Makefile" 2>/dev/null | xargs -r sed -i 's/-Wno-gcc-compat//g; s/-fipa-pta//g'
           else
-            echo "Clean: no -Wno-gcc-compat found in Kbuild/Makefile"
+            echo "Clean: no incompatible flags in Kbuild/Makefile"
           fi
 
           # Post-patch fixup: remove calls to stripped hook functions in init.c
@@ -261,10 +262,11 @@ jobs:
             echo "LLD_BIN=$LLD_BIN"
             if [ -n "$CLANG_BIN" ] && [ -n "$LLD_BIN" ]; then
               echo "Building with Clang/LLVM for SUSFS compatibility..."
-              # Strip GCC-only flags that Clang rejects (e.g. -fipa-pta from Sultan optimizations)
+              # Strip GCC-only flags that Clang rejects
+              # -fipa-pta can live in Makefile, Kbuild, .config, or generated headers
               echo "Stripping GCC-only flags for Clang..."
-              find . -name "Makefile" -type f -exec sed -i 's/-fipa-pta//g' {} \;
-              find . -name "Kbuild" -type f -exec sed -i 's/-fipa-pta//g' {} \;
+              grep -rl "fipa-pta" . --include="Makefile" --include="Kbuild" --include="*.h" 2>/dev/null | xargs -r sed -i 's/-fipa-pta//g'
+              grep -rl "Wno-gcc-compat" . --include="Makefile" --include="Kbuild" 2>/dev/null | xargs -r sed -i 's/-Wno-gcc-compat//g'
               make -j$(nproc) ARCH=arm64 \
                 CC="$CLANG_BIN" \
                 LD="$LLD_BIN" \
@@ -273,15 +275,16 @@ jobs:
                 KCFLAGS="-w"
             else
               echo "WARNING: clang/ld.lld not found, falling back to GCC"
-              echo "Patching Kbuild one more time to be safe..."
-              find . -name "Kbuild" -type f -exec sed -i 's/-Wno-gcc-compat//g' {} \;
-              grep -rn "Wno-gcc-compat" . --include="Kbuild" --include="Makefile" 2>/dev/null || echo "Clean"
+              echo "Stripping Clang-only flags for GCC..."
+              grep -rl "Wno-gcc-compat" . --include="Makefile" --include="Kbuild" 2>/dev/null | xargs -r sed -i 's/-Wno-gcc-compat//g'
               make -j$(nproc) ARCH=arm64 \
                 CROSS_COMPILE=aarch64-linux-gnu- \
                 CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
                 KCFLAGS="-w"
             fi
           else
+            # Non-SUSFS build: strip Clang-only flags in case KSU Kbuild has them
+            grep -rl "Wno-gcc-compat" . --include="Makefile" --include="Kbuild" 2>/dev/null | xargs -r sed -i 's/-Wno-gcc-compat//g'
             make -j$(nproc) ARCH=arm64 \
               CROSS_COMPILE=aarch64-linux-gnu- \
               CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
