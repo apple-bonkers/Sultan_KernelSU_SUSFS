@@ -131,15 +131,15 @@ jobs:
           echo "Stripping GCC-incompatible flags from all Kbuild and Makefile files..."
           grep -rl "Wno-gcc-compat" . --include="Makefile" --include="Kbuild" 2>/dev/null | xargs -r sed -i 's/-Wno-gcc-compat//g'
           # Also strip GCC-only flags that would break Clang
-          grep -rl "fipa-pta" . --include="Makefile" --include="Kbuild" 2>/dev/null | xargs -r sed -i 's/-fipa-pta//g'
+          grep -rl "fipa-pta\|flinker-output=nolto-rel" . --include="Makefile" --include="Kbuild" 2>/dev/null | xargs -r sed -i 's/-fipa-pta//g; s/-flinker-output=nolto-rel//g'
           
           # Verify the strip worked
           echo "Verifying incompatible flags are gone..."
-          if grep -rq "Wno-gcc-compat\|fipa-pta" . --include="Kbuild" --include="Makefile" 2>/dev/null; then
+          if grep -rq "Wno-gcc-compat\|fipa-pta\|flinker-output=nolto-rel" . --include="Kbuild" --include="Makefile" 2>/dev/null; then
             echo "WARNING: incompatible flags still found in:"
-            grep -rn "Wno-gcc-compat\|fipa-pta" . --include="Kbuild" --include="Makefile" 2>/dev/null
+            grep -rn "Wno-gcc-compat\|fipa-pta\|flinker-output=nolto-rel" . --include="Kbuild" --include="Makefile" 2>/dev/null
             echo "Force-removing..."
-            grep -rl "Wno-gcc-compat\|fipa-pta" . --include="Kbuild" --include="Makefile" 2>/dev/null | xargs -r sed -i 's/-Wno-gcc-compat//g; s/-fipa-pta//g'
+            grep -rl "Wno-gcc-compat\|fipa-pta\|flinker-output=nolto-rel" . --include="Kbuild" --include="Makefile" 2>/dev/null | xargs -r sed -i 's/-Wno-gcc-compat//g; s/-fipa-pta//g; s/-flinker-output=nolto-rel//g'
           else
             echo "Clean: no incompatible flags in Kbuild/Makefile"
           fi
@@ -265,7 +265,7 @@ jobs:
               # Strip GCC-only flags that Clang rejects
               # -fipa-pta can live in Makefile, Kbuild, .config, or generated headers
               echo "Stripping GCC-only flags for Clang..."
-              grep -rl "fipa-pta" . --include="Makefile" --include="Kbuild" --include="*.h" 2>/dev/null | xargs -r sed -i 's/-fipa-pta//g'
+              grep -rl "fipa-pta\|flinker-output=nolto-rel" . --include="Makefile" --include="Kbuild" --include="*.h" 2>/dev/null | xargs -r sed -i 's/-fipa-pta//g; s/-flinker-output=nolto-rel//g'
               grep -rl "Wno-gcc-compat" . --include="Makefile" --include="Kbuild" 2>/dev/null | xargs -r sed -i 's/-Wno-gcc-compat//g'
               make -j$(nproc) ARCH=arm64 \
                 CC="$CLANG_BIN" \
