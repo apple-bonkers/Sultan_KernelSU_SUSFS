@@ -114,10 +114,6 @@ jobs:
           echo "KernelSU-Next patched"
           cd ..
           
-          # Strip Clang-only flags that break GCC builds
-          echo "Stripping GCC-incompatible flags from Kbuild files..."
-          find . -name "Kbuild" -type f -exec sed -i 's/-Wno-gcc-compat//g' {} \;
-          
           echo "Applying SUSFS GKI patch..."
           patch -p1 -F5 --ignore-whitespace < 50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch || echo "WARNING: SUSFS GKI patch had failures"
           
@@ -130,6 +126,53 @@ jobs:
             echo "Applying sys.c_fix.patch..."
             patch -p1 -F5 --ignore-whitespace < ../kernel_patches/sultan/sys.c_fix.patch || echo "WARNING: sys.c_fix.patch had failures"
           fi
+
+          # Strip Clang-only flags that break GCC (after ALL patches applied)
+          echo "Stripping GCC-incompatible flags from all Kbuild and Makefile files..."
+          find . -name "Kbuild" -type f -print -exec sed -i 's/-Wno-gcc-compat//g' {} \;
+          find . -name "Makefile" -type f -print -exec sed -i 's/-Wno-gcc-compat//g' {} \;
+          
+          # Verify the strip worked
+          echo "Verifying no -Wno-gcc-compat remains..."
+          if grep -rq "Wno-gcc-compat" . --include="Kbuild" --include="Makefile" 2>/dev/null; then
+            echo "WARNING: -Wno-gcc-compat still found in:"
+            grep -rn "Wno-gcc-compat" . --include="Kbuild" --include="Makefile" 2>/dev/null
+            echo "Attempting force removal..."
+            grep -rl "Wno-gcc-compat" . --include="Kbuild" --include="Makefile" 2>/dev/null | xargs -r sed -i 's/-Wno-gcc-compat//g'
+          else
+            echo "Clean: no -Wno-gcc-compat found in Kbuild/Makefile"
+          fi
+
+          # Post-patch fixup: remove calls to stripped hook functions in init.c
+          # The patch may have partially failed, leaving dangling references
+          echo "Post-patch fixup for init.c..."
+          for init_c in $(find . -path "*/kernelsu/core/init.c" -o -path "*/KernelSU*/kernel/core/init.c" -o -path "*/KernelSU-Next/kernel/core/init.c" 2>/dev/null); do
+            echo "  Fixing $init_c"
+            # Remove include for removed headers
+            sed -i '/#include.*hook\/syscall_hook_manager\.h/d' "$init_c"
+            sed -i '/#include.*hook\/lsm_hook\.h/d' "$init_c"
+            sed -i '/#include.*hook\/syscall_hook\.h/d' "$init_c"
+            sed -i '/#include.*infra\/symbol_resolver\.h/d' "$init_c"
+            # Remove calls to removed functions
+            sed -i '/ksu_init_symbol_resolver()/d' "$init_c"
+            sed -i '/ksu_syscall_hook_init()/d' "$init_c"
+            sed -i '/ksu_lsm_hook_init()/d' "$init_c"
+            sed -i '/ksu_lsm_hook_exit()/d' "$init_c"
+            sed -i '/ksu_syscall_hook_manager_init()/d' "$init_c"
+            sed -i '/ksu_syscall_hook_manager_exit()/d' "$init_c"
+            # Remove ksu_late_loaded references
+            sed -i '/ksu_late_loaded/d' "$init_c"
+            # Remove x86_64 check blocks
+            sed -i '/#if defined(__x86_64__)/,/X86_FEATURE_INDIRECT_SAFE.*$/d' "$init_c"
+            # Ensure susfs.h include exists if CONFIG_KSU_SUSFS is used
+            if grep -q "susfs_init\|CONFIG_KSU_SUSFS" "$init_c" 2>/dev/null; then
+              if ! grep -q '#include.*linux/susfs' "$init_c" 2>/dev/null; then
+                sed -i '1s/^/#include <linux\/susfs.h>\n/' "$init_c"
+                echo "    Added missing susfs.h include"
+              fi
+            fi
+            echo "  Fixed $init_c"
+          done
 
       - name: Configure KernelSU
         run: |
@@ -204,10 +247,34 @@ jobs:
           cd "$CONFIG"
           make ARCH=arm64 ${{ inputs.codename }}_defconfig
           if [[ "${{ matrix.susfs }}" == "true" ]]; then
-            # Use Clang for SUSFS builds (GKI patches require Clang)
-            make -j$(nproc) ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- KCFLAGS="-w"
+            # Find clang (Ubuntu may install as clang-18, clang-14, etc.)
+            CLANG_BIN=$(which clang 2>/dev/null || ls /usr/bin/clang-[0-9]* 2>/dev/null | head -1)
+            LLD_BIN=$(which ld.lld 2>/dev/null || ls /usr/bin/ld.lld-[0-9]* 2>/dev/null | head -1)
+            echo "CLANG_BIN=$CLANG_BIN"
+            echo "LLD_BIN=$LLD_BIN"
+            if [ -n "$CLANG_BIN" ] && [ -n "$LLD_BIN" ]; then
+              echo "Building with Clang/LLVM for SUSFS compatibility..."
+              make -j$(nproc) ARCH=arm64 \
+                CC="$CLANG_BIN" \
+                LD="$LLD_BIN" \
+                CROSS_COMPILE=aarch64-linux-gnu- \
+                CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
+                KCFLAGS="-w"
+            else
+              echo "WARNING: clang/ld.lld not found, falling back to GCC"
+              echo "Patching Kbuild one more time to be safe..."
+              find . -name "Kbuild" -type f -exec sed -i 's/-Wno-gcc-compat//g' {} \;
+              grep -rn "Wno-gcc-compat" . --include="Kbuild" --include="Makefile" 2>/dev/null || echo "Clean"
+              make -j$(nproc) ARCH=arm64 \
+                CROSS_COMPILE=aarch64-linux-gnu- \
+                CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
+                KCFLAGS="-w"
+            fi
           else
-            make -j$(nproc) ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- KCFLAGS="-w"
+            make -j$(nproc) ARCH=arm64 \
+              CROSS_COMPILE=aarch64-linux-gnu- \
+              CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
+              KCFLAGS="-w"
           fi
 
       - name: Package Kernel
