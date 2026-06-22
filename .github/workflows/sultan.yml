@@ -261,6 +261,10 @@ jobs:
             echo "LLD_BIN=$LLD_BIN"
             if [ -n "$CLANG_BIN" ] && [ -n "$LLD_BIN" ]; then
               echo "Building with Clang/LLVM for SUSFS compatibility..."
+              # Strip GCC-only flags that Clang rejects (e.g. -fipa-pta from Sultan optimizations)
+              echo "Stripping GCC-only flags for Clang..."
+              find . -name "Makefile" -type f -exec sed -i 's/-fipa-pta//g' {} \;
+              find . -name "Kbuild" -type f -exec sed -i 's/-fipa-pta//g' {} \;
               make -j$(nproc) ARCH=arm64 \
                 CC="$CLANG_BIN" \
                 LD="$LLD_BIN" \
