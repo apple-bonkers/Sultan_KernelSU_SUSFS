@@ -29,7 +29,7 @@ diff -ruN ksu-clean/kernel/Kbuild ksu-working/kernel/Kbuild
  kernelsu-objs += manager/apk_sign.o
 @@ -146,5 +134,15 @@
  
- ccflags-y += -Wno-strict-prototypes -Wno-int-conversion -Wno-gcc-compat -Wno-missing-prototypes
+ ccflags-y += -Wno-strict-prototypes -Wno-int-conversion -Wno-missing-prototypes
  ccflags-y += -Wno-declaration-after-statement -Wno-unused-function -Wno-unused-variable
 +
 +## For susfs stuff ##
@@ -193,7 +193,7 @@ diff -ruN ksu-clean/kernel/Kbuild.orig ksu-working/kernel/Kbuild.orig
 +
 +ccflags-y += -DKSU_NEW_DCACHE_FLUSH=$(KSU_NEW_DCACHE_FLUSH)
 +
-+ccflags-y += -Wno-strict-prototypes -Wno-int-conversion -Wno-gcc-compat -Wno-missing-prototypes
++ccflags-y += -Wno-strict-prototypes -Wno-int-conversion -Wno-missing-prototypes
 +ccflags-y += -Wno-declaration-after-statement -Wno-unused-function -Wno-unused-variable
 +
 +# Keep a new line here!! Because someone may append config
