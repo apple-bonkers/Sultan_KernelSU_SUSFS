@@ -36,7 +36,7 @@ jobs:
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential bc bison flex libssl-dev libelf-dev gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
+          sudo apt-get install -y build-essential bc bison flex libssl-dev libelf-dev gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi clang lld
           
       - name: Set CONFIG Environment Variable
         run: |
@@ -113,6 +113,11 @@ jobs:
 
           echo "KernelSU-Next patched"
           cd ..
+          
+          # Strip Clang-only flags that break GCC builds
+          echo "Stripping GCC-incompatible flags from Kbuild files..."
+          find . -name "Kbuild" -type f -exec sed -i 's/-Wno-gcc-compat//g' {} \;
+          
           echo "Applying SUSFS GKI patch..."
           patch -p1 -F5 --ignore-whitespace < 50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch || echo "WARNING: SUSFS GKI patch had failures"
           
@@ -198,7 +203,12 @@ jobs:
         run: |
           cd "$CONFIG"
           make ARCH=arm64 ${{ inputs.codename }}_defconfig
-          make -j$(nproc) ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- KCFLAGS="-w"
+          if [[ "${{ matrix.susfs }}" == "true" ]]; then
+            # Use Clang for SUSFS builds (GKI patches require Clang)
+            make -j$(nproc) ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- KCFLAGS="-w"
+          else
+            make -j$(nproc) ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- KCFLAGS="-w"
+          fi
 
       - name: Package Kernel
         run: |
