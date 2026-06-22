@@ -145,31 +145,38 @@ jobs:
 
           # Post-patch fixup: remove calls to stripped hook functions in init.c
           # The patch may have partially failed, leaving dangling references
+          # NOTE: we do NOT remove ksu_late_loaded lines — that would break
+          # if/else control flow. An unused variable warning is suppressed by -w.
           echo "Post-patch fixup for init.c..."
-          for init_c in $(find . -path "*/kernelsu/core/init.c" -o -path "*/KernelSU*/kernel/core/init.c" -o -path "*/KernelSU-Next/kernel/core/init.c" 2>/dev/null); do
+          for init_c in $(find . -path "*/kernelsu/core/init.c" -o -path "*/KernelSU*/kernel/core/init.c" 2>/dev/null); do
             echo "  Fixing $init_c"
-            # Remove include for removed headers
+            # Remove includes for headers whose .o files were stripped from Kbuild
             sed -i '/#include.*hook\/syscall_hook_manager\.h/d' "$init_c"
             sed -i '/#include.*hook\/lsm_hook\.h/d' "$init_c"
             sed -i '/#include.*hook\/syscall_hook\.h/d' "$init_c"
             sed -i '/#include.*infra\/symbol_resolver\.h/d' "$init_c"
-            # Remove calls to removed functions
+            # Remove calls to functions whose .o files were stripped from Kbuild
             sed -i '/ksu_init_symbol_resolver()/d' "$init_c"
             sed -i '/ksu_syscall_hook_init()/d' "$init_c"
             sed -i '/ksu_lsm_hook_init()/d' "$init_c"
             sed -i '/ksu_lsm_hook_exit()/d' "$init_c"
             sed -i '/ksu_syscall_hook_manager_init()/d' "$init_c"
             sed -i '/ksu_syscall_hook_manager_exit()/d' "$init_c"
-            # Remove ksu_late_loaded references
-            sed -i '/ksu_late_loaded/d' "$init_c"
-            # Remove x86_64 check blocks
+            # Remove x86_64 check blocks (can cause build issues on ARM64)
             sed -i '/#if defined(__x86_64__)/,/X86_FEATURE_INDIRECT_SAFE.*$/d' "$init_c"
-            # Ensure susfs.h include exists if CONFIG_KSU_SUSFS is used
+            sed -i '/#ifndef X86_FEATURE_INDIRECT_SAFE/,/^#endif/d' "$init_c"
+            # Ensure susfs.h include exists if susfs_init() or CONFIG_KSU_SUSFS is used
             if grep -q "susfs_init\|CONFIG_KSU_SUSFS" "$init_c" 2>/dev/null; then
               if ! grep -q '#include.*linux/susfs' "$init_c" 2>/dev/null; then
                 sed -i '1s/^/#include <linux\/susfs.h>\n/' "$init_c"
                 echo "    Added missing susfs.h include"
               fi
+            fi
+            # If ksu_late_loaded is used but not declared (partial patch removed declaration),
+            # add the declaration back to avoid "undeclared" error
+            if grep -q "ksu_late_loaded" "$init_c" 2>/dev/null && ! grep -q "bool ksu_late_loaded\|extern bool ksu_late_loaded" "$init_c" 2>/dev/null; then
+              sed -i '/struct cred \*ksu_cred;/a\bool ksu_late_loaded;' "$init_c"
+              echo "    Restored missing ksu_late_loaded declaration"
             fi
             echo "  Fixed $init_c"
           done
