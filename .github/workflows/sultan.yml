@@ -36,7 +36,7 @@ jobs:
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential bc bison flex libssl-dev libelf-dev gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi clang lld
+          sudo apt-get install -y build-essential bc bison flex libssl-dev libelf-dev gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi clang lld llvm
           
       - name: Set CONFIG Environment Variable
         run: |
@@ -263,15 +263,14 @@ jobs:
             if [ -n "$CLANG_BIN" ] && [ -n "$LLD_BIN" ]; then
               echo "Building with Clang/LLVM for SUSFS compatibility..."
               # Strip GCC-only flags that Clang rejects
-              # -fipa-pta can live in Makefile, Kbuild, .config, or generated headers
               echo "Stripping GCC-only flags for Clang..."
               grep -rl "fipa-pta\|flinker-output=nolto-rel" . --include="Makefile" --include="Kbuild" --include="*.h" 2>/dev/null | xargs -r sed -i 's/-fipa-pta//g; s/-flinker-output=nolto-rel//g'
               grep -rl "Wno-gcc-compat" . --include="Makefile" --include="Kbuild" 2>/dev/null | xargs -r sed -i 's/-Wno-gcc-compat//g'
-              make -j$(nproc) ARCH=arm64 \
-                CC="$CLANG_BIN" \
-                LD="$LLD_BIN" \
+              # LLVM=1 properly configures CC, LD, AR, NM, OBJCOPY, etc. for the
+              # entire build including VDSO. CROSS_COMPILE provides remaining GNU
+              # binutils (objcopy, strip) not covered by LLVM=1.
+              make -j$(nproc) ARCH=arm64 LLVM=1 \
                 CROSS_COMPILE=aarch64-linux-gnu- \
-                CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
                 KCFLAGS="-w"
             else
               echo "WARNING: clang/ld.lld not found, falling back to GCC"
